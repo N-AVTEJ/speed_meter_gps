@@ -4,13 +4,14 @@ import { kmhToMph } from '../utils/speedMath';
 export type SpeedUnit = 'km/h' | 'mph';
 
 interface AnalogArcGaugeProps {
-  speedKmh: number;
+  speedKmh: number | null;
   unit: SpeedUnit;
 }
 
 export const AnalogArcGauge: React.FC<AnalogArcGaugeProps> = ({ speedKmh, unit }) => {
   const isMph = unit === 'mph';
-  const currentSpeed = isMph ? kmhToMph(speedKmh) : speedKmh;
+  const hasSpeed = speedKmh !== null && !isNaN(speedKmh);
+  const currentSpeed = hasSpeed ? (isMph ? kmhToMph(speedKmh) : speedKmh) : 0;
   const maxSpeed = isMph ? 125 : 200;
 
   // Gauge Geometry: Center at (250, 250), radius 185
@@ -21,9 +22,9 @@ export const AnalogArcGauge: React.FC<AnalogArcGaugeProps> = ({ speedKmh, unit }
   const startAngle = 140;
   const totalSweep = 260;
 
-  // Clamp speed for needle position
-  const clampedSpeed = Math.max(0, Math.min(maxSpeed, currentSpeed));
-  const fraction = clampedSpeed / maxSpeed;
+  // Clamp speed for needle position: rests at 0 if no signal/fix
+  const clampedSpeed = hasSpeed ? Math.max(0, Math.min(maxSpeed, currentSpeed)) : 0;
+  const fraction = hasSpeed ? clampedSpeed / maxSpeed : 0;
   const needleAngle = startAngle + fraction * totalSweep;
 
   // Arc paths
@@ -270,7 +271,7 @@ export const AnalogArcGauge: React.FC<AnalogArcGaugeProps> = ({ speedKmh, unit }
             textShadow: '0 0 40px rgba(255, 107, 0, 0.35), 0 4px 12px rgba(0,0,0,0.9)',
           }}
         >
-          {roundedSpeed}
+          {hasSpeed ? roundedSpeed : '--'}
         </span>
         <span className="mt-1 sm:mt-2 text-xl sm:text-2xl font-black tracking-widest text-[#ff6b00] uppercase glow-neon-text">
           {unit}

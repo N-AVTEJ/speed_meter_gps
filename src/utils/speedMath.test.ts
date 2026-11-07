@@ -8,6 +8,7 @@ import {
   isFixAccurate,
   applySpeedThreshold,
   getAccuracyStatus,
+  isGpsTimedOut,
   MAX_ACCEPTABLE_ACCURACY_METERS,
 } from './speedMath';
 
@@ -87,4 +88,21 @@ test('getAccuracyStatus returns appropriate colors for thresholds', () => {
   assert.equal(getAccuracyStatus(11), 'yellow');
   assert.equal(getAccuracyStatus(10), 'green');
   assert.equal(getAccuracyStatus(3), 'green');
+});
+
+test('isGpsTimedOut detects 3s dropout accurately', () => {
+  // Never received any fix yet
+  assert.equal(isGpsTimedOut(null, 10000), true);
+
+  // Recent fix (1000 ms ago)
+  assert.equal(isGpsTimedOut(9000, 10000), false);
+
+  // Fix 2999 ms ago
+  assert.equal(isGpsTimedOut(7001, 10000), false);
+
+  // Exactly 3000 ms ago -> timed out!
+  assert.equal(isGpsTimedOut(7000, 10000), true);
+
+  // Fix 4500 ms ago -> timed out!
+  assert.equal(isGpsTimedOut(5500, 10000), true);
 });

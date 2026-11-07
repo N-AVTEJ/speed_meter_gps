@@ -15,6 +15,21 @@ export const MAX_ACCEPTABLE_ACCURACY_METERS = 25;
 export const MIN_DISPLAY_SPEED_KMH = 2;
 export const GAUGE_MAX_KMH = 200;
 export const KMH_TO_MPH_FACTOR = 0.621371192237334;
+export const GPS_TIMEOUT_MS = 3000;
+
+/**
+ * Checks if GPS has timed out (no accepted fix for >= 3000 ms).
+ */
+export function isGpsTimedOut(
+  lastAcceptedFixTime: number | null,
+  currentTime: number,
+  timeoutMs = GPS_TIMEOUT_MS
+): boolean {
+  if (lastAcceptedFixTime === null) {
+    return true;
+  }
+  return currentTime - lastAcceptedFixTime >= timeoutMs;
+}
 
 /**
  * Calculate Haversine distance between two coordinates in meters.

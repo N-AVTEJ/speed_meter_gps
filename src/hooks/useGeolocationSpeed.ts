@@ -23,13 +23,14 @@ export type PermissionStatusType =
 export interface GeolocationSpeedState {
   rawSpeedKmh: number;
   filteredSpeedKmh: number;
-  displaySpeedKmh: number;
+  displaySpeedKmh: number | null;
   accuracy: number | null;
   accuracyStatus: AccuracyLevel;
   droppedFixCount: number;
   permissionStatus: PermissionStatusType;
   errorMessage: string | null;
   lastFixTime: number | null;
+  isGpsLost: boolean;
   retry: () => void;
   isSimulating: boolean;
   toggleSimulation: () => void;
@@ -38,13 +39,17 @@ export interface GeolocationSpeedState {
 export function useGeolocationSpeed(): GeolocationSpeedState {
   const [rawSpeedKmh, setRawSpeedKmh] = useState<number>(0);
   const [filteredSpeedKmh, setFilteredSpeedKmh] = useState<number>(0);
-  const [displaySpeedKmh, setDisplaySpeedKmh] = useState<number>(0);
+  const [displaySpeedKmh, setDisplaySpeedKmh] = useState<number | null>(null);
   const [accuracy, setAccuracy] = useState<number | null>(null);
   const [accuracyStatus, setAccuracyStatus] = useState<AccuracyLevel>('red');
   const [droppedFixCount, setDroppedFixCount] = useState<number>(0);
   const [permissionStatus, setPermissionStatus] = useState<PermissionStatusType>('prompt');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastFixTime, setLastFixTime] = useState<number | null>(null);
+  const [isGpsLost, setIsGpsLost] = useState<boolean>(true);
+
+  // Tracks timestamp of last ACCEPTED fix (accuracy <= 25m)
+  const lastAcceptedFixTimeRef = useRef<number | null>(null);
 
   // Check URL param ?demo=1 for testing
   const [isSimulating, setIsSimulating] = useState<boolean>(() => {
@@ -87,6 +92,9 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       return;
     }
 
+    // Accepted GPS Fix arrived! Update timestamp and mark signal active
+    lastAcceptedFixTimeRef.current = Date.now();
+    setIsGpsLost(false);
     setAccuracyStatus(getAccuracyStatus(acc));
 
     // Determine raw speed (m/s -> km/h)
@@ -204,15 +212,52 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   const retry = useCallback(() => {
     kalmanFilterRef.current.reset(0);
     prevFixRef.current = null;
+    lastAcceptedFixTimeRef.current = null;
     setRawSpeedKmh(0);
     setFilteredSpeedKmh(0);
-    setDisplaySpeedKmh(0);
+    setDisplaySpeedKmh(null);
+    setIsGpsLost(true);
+    setAccuracy(null);
+    setAccuracyStatus('red');
     setErrorMessage(null);
     startWatching();
   }, [startWatching]);
 
   const toggleSimulation = useCallback(() => {
     setIsSimulating((prev) => !prev);
+  }, []);
+
+  // 3-second watchdog timer:
+  // If no accepted GPS fix arrives for 3 seconds, display '--' and set the dot red.
+  // Never hold the last speed.
+  useEffect(() => {
+    const checkTimeout = () => {
+      const now = Date.now();
+      const lastFix = lastAcceptedFixTimeRef.current;
+      if (lastFix === null || now - lastFix >= 3000) {
+        setIsGpsLost(true);
+        setDisplaySpeedKmh(null);
+        setAccuracyStatus('red');
+        setAccuracy(null);
+        kalmanFilterRef.current.reset(0);
+        prevFixRef.current = null;
+      }
+    };
+
+    const interval = window.setInterval(checkTimeout, 100);
+
+    // Testing helper for headless browser automated verification
+    if (typeof window !== 'undefined') {
+      (window as unknown as { __simulateGpsDropout?: () => void }).__simulateGpsDropout = () => {
+        if (simTimerRef.current !== null) {
+          window.clearInterval(simTimerRef.current);
+          simTimerRef.current = null;
+        }
+        lastAcceptedFixTimeRef.current = Date.now() - 3500;
+      };
+    }
+
+    return () => window.clearInterval(interval);
   }, []);
 
   // Main lifecycle
@@ -240,9 +285,10 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     setErrorMessage(null);
     setAccuracy(4.2);
     setAccuracyStatus('green');
+    lastAcceptedFixTimeRef.current = Date.now();
+    setIsGpsLost(false);
 
     let simTarget = 0;
-    let simCurrent = 0;
     let t = 0;
 
     const interval = window.setInterval(() => {
@@ -273,6 +319,10 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       const thresholded = applySpeedThreshold(filtered);
       setDisplaySpeedKmh(Math.min(GAUGE_MAX_KMH, thresholded));
       setLastFixTime(Date.now());
+      lastAcceptedFixTimeRef.current = Date.now();
+      setIsGpsLost(false);
+      setAccuracy(4.2);
+      setAccuracyStatus('green');
     }, 200);
 
     simTimerRef.current = interval;
@@ -293,6 +343,7 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     permissionStatus,
     errorMessage,
     lastFixTime,
+    isGpsLost,
     retry,
     isSimulating,
     toggleSimulation,

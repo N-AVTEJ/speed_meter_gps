@@ -26,8 +26,8 @@ export const GpsStatusBadge: React.FC<GpsStatusBadgeProps> = ({
       : status === 'yellow'
       ? `GPS ±${accuracy ? Math.round(accuracy) : 0}m`
       : accuracy && accuracy > 25
-      ? `POOR (±${Math.round(accuracy)}m)`
-      : 'ACQUIRING GPS';
+      ? `DROPPED (>25m)`
+      : 'NO GPS FIX';
 
   return (
     <div
