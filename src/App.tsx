@@ -5,7 +5,7 @@
  * Display only. No backend, no accounts, no ads, no subscriptions.
  */
 
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { useGeolocationSpeed } from './hooks/useGeolocationSpeed';
 import { useWakeLock } from './hooks/useWakeLock';
 import { AnalogArcGauge, SpeedUnit } from './components/AnalogArcGauge';
@@ -16,27 +16,63 @@ import { DashboardControls } from './components/DashboardControls';
 import { PermissionDeniedModal } from './components/PermissionDeniedModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
 import { OfflineIndicator } from './components/OfflineIndicator';
+import { DebugOverlay } from './components/DebugOverlay';
 
 export default function App() {
   const [unit, setUnit] = useState<SpeedUnit>('km/h');
   const [isHudMirrored, setIsHudMirrored] = useState<boolean>(false);
 
-  // GPS Speed & Kalman Filter hook (logic untouched)
+  // Debug overlay state: enabled via ?debug=1 or triple-tap on gauge section
+  const [showDebug, setShowDebug] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return params.get('debug') === '1';
+    }
+    return false;
+  });
+
+  // GPS Speed & Kalman Filter hook
   const {
+    rawSpeedKmh,
+    filteredSpeedKmh,
     displaySpeedKmh,
     accuracy,
     accuracyStatus,
     droppedFixCount,
     permissionStatus,
     errorMessage,
+    lastFixTime,
     hasReceivedFirstFix,
     retry,
     isSimulating,
     toggleSimulation,
+    debug,
   } = useGeolocationSpeed();
 
   // Screen Wake Lock API active while running
   const { isActive: isWakeLockActive } = useWakeLock();
+
+  // When debug overlay is shown, refresh every 250 ms to keep telemetry live
+  const [, setDebugTick] = useState<number>(0);
+  useEffect(() => {
+    if (!showDebug) return;
+    const interval = window.setInterval(() => {
+      setDebugTick((t) => t + 1);
+    }, 250);
+    return () => window.clearInterval(interval);
+  }, [showDebug]);
+
+  // Triple-tap on gauge section (3 taps within 700 ms) toggles debug overlay
+  const tapTimesRef = useRef<number[]>([]);
+  const handleGaugeSectionClick = useCallback(() => {
+    const now = Date.now();
+    const recent = [...tapTimesRef.current.filter((t) => now - t <= 700), now];
+    tapTimesRef.current = recent;
+    if (recent.length >= 3) {
+      setShowDebug((prev) => !prev);
+      tapTimesRef.current = [];
+    }
+  }, []);
 
   const handleToggleUnit = useCallback(() => {
     setUnit((prev) => (prev === 'km/h' ? 'mph' : 'km/h'));
@@ -92,12 +128,24 @@ export default function App() {
         </div>
       </header>
 
+      {/* Real-time GPS Diagnostics Overlay (toggled via ?debug=1 or 3 taps on gauge) */}
+      {showDebug && (
+        <DebugOverlay
+          debug={debug}
+          accuracy={accuracy}
+          rawSpeedKmh={rawSpeedKmh}
+          filteredSpeedKmh={filteredSpeedKmh}
+          lastFixTime={lastFixTime}
+        />
+      )}
+
       {/* Center Gauge Viewport - Horizontally flipped in HUD Mirror mode */}
       <section
-        className={`relative z-20 flex-1 flex flex-col items-center justify-center p-2 transition-transform duration-300 ${
+        className={`relative z-20 flex-1 flex flex-col items-center justify-center p-2 transition-transform duration-300 cursor-pointer ${
           isHudMirrored ? 'hud-mirrored' : ''
         }`}
         aria-label="Speedometer Display"
+        onClick={handleGaugeSectionClick}
       >
         {isHudMirrored && (
           <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-[#ff5500]/25 border border-[#ff6d00]/60 text-[11px] font-unit font-black uppercase tracking-widest text-[#ff8800]">

@@ -39,10 +39,33 @@ test('SpeedKalmanFilter reacts rapidly to throttle acceleration', () => {
   assert.ok(step3 > 100, `Expected tracking close to target on step 3, got ${step3}`);
 });
 
+test('SpeedKalmanFilter: smoothing jitter with processNoise 2.5 and measurementNoise 4 ends below 4', () => {
+  const kf = new SpeedKalmanFilter({ processNoise: 2.5, measurementNoise: 4 });
+  kf.update(0);
+
+  const jitterSeq = [5, 1, 6, 0, 4, 2, 6, 1, 5, 0, 4, 3];
+  let result = 0;
+  for (const val of jitterSeq) {
+    result = kf.update(val, 12);
+  }
+
+  assert.ok(result < 4, `Expected final smoothed estimate below 4, got ${result}`);
+});
+
+test('SpeedKalmanFilter: processNoise 2.5 and measurementNoise 4 accelerates 0 -> 40 > 25 and 80 > 60', () => {
+  const kf = new SpeedKalmanFilter({ processNoise: 2.5, measurementNoise: 4 });
+  kf.update(0);
+
+  const step1 = kf.update(40);
+  assert.ok(step1 > 25, `Expected step1 > 25, got ${step1}`);
+
+  const step2 = kf.update(80);
+  assert.ok(step2 > 60, `Expected step2 > 60, got ${step2}`);
+});
+
 test('SpeedKalmanFilter seeds with first accepted fix measured speed at app launch, not 0', () => {
   const kf = new SpeedKalmanFilter();
   assert.equal(kf.isFilterInitialized(), false);
-  // Rider launches app while already cruising at 85 km/h
   const initialEstimate = kf.update(85);
   assert.equal(initialEstimate, 85);
   assert.equal(kf.getEstimate(), 85);
@@ -54,13 +77,10 @@ test('SpeedKalmanFilter seeds with first accepted fix measured speed after any r
   kf.update(50);
   kf.update(55);
 
-  // GPS lost / signal reset occurs
   kf.reset();
   assert.equal(kf.isFilterInitialized(), false);
 
-  // First accepted fix after reset arrives at 95 km/h (e.g. exiting tunnel)
   const afterResetEstimate = kf.update(95);
-  // Must be seeded directly with 95 km/h, not interpolated from 0
   assert.equal(afterResetEstimate, 95);
   assert.equal(kf.getEstimate(), 95);
   assert.equal(kf.isFilterInitialized(), true);

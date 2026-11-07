@@ -1,12 +1,13 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import {
   msToKmh,
-  calculateFallbackSpeedKmh,
-  isFixAccurate,
+  estimateFallbackSpeed,
+  applyStationaryHysteresis,
   applySpeedThreshold,
+  isFixAccurate,
   getAccuracyStatus,
   shouldRejectSpeedJump,
-  GeoFix,
+  FallbackAnchor,
   AccuracyLevel,
   GAUGE_MAX_KMH,
   MAX_ACCEPTABLE_ACCURACY_METERS,
@@ -20,6 +21,15 @@ export type PermissionStatusType =
   | 'unavailable'
   | 'timeout'
   | 'unsupported';
+
+export interface GpsDebugInfo {
+  hardwareSpeedKmh: number | null;
+  speedSource: 'doppler' | 'fallback' | 'none';
+  accepted: number;
+  rejectedAccuracy: number;
+  rejectedJump: number;
+  rejectedUnknown: number;
+}
 
 export interface GeolocationSpeedState {
   rawSpeedKmh: number;
@@ -36,6 +46,7 @@ export interface GeolocationSpeedState {
   retry: () => void;
   isSimulating: boolean;
   toggleSimulation: () => void;
+  debug: GpsDebugInfo;
 }
 
 export function useGeolocationSpeed(): GeolocationSpeedState {
@@ -51,10 +62,24 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   const [isGpsLost, setIsGpsLost] = useState<boolean>(true);
   const [hasReceivedFirstFix, setHasReceivedFirstFix] = useState<boolean>(false);
 
+  const [debug, setDebug] = useState<GpsDebugInfo>({
+    hardwareSpeedKmh: null,
+    speedSource: 'none',
+    accepted: 0,
+    rejectedAccuracy: 0,
+    rejectedJump: 0,
+    rejectedUnknown: 0,
+  });
+
   // Tracks timestamp of last ACCEPTED fix (accuracy <= 25m)
   const lastAcceptedFixTimeRef = useRef<number | null>(null);
   // Tracks speed & timestamp of last ACCEPTED fix for jump rejection
   const lastAcceptedSpeedFixRef = useRef<{ speedKmh: number; timestamp: number } | null>(null);
+
+  // Fallback anchor to prevent jitter accumulation while stationary
+  const anchorRef = useRef<FallbackAnchor | null>(null);
+  const isStoppedRef = useRef<boolean>(true);
+  const jumpRejectStreakRef = useRef<number>(0);
 
   // Check URL param ?demo=1 for testing
   const [isSimulating, setIsSimulating] = useState<boolean>(() => {
@@ -66,9 +91,8 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   });
 
   const watchIdRef = useRef<number | null>(null);
-  const prevFixRef = useRef<GeoFix | null>(null);
   const kalmanFilterRef = useRef<SpeedKalmanFilter>(
-    new SpeedKalmanFilter({ processNoise: 3.5, measurementNoise: 1.5 })
+    new SpeedKalmanFilter({ processNoise: 2.5, measurementNoise: 4 })
   );
   const simTimerRef = useRef<number | null>(null);
 
@@ -90,68 +114,118 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     setAccuracy(acc);
     setLastFixTime(timestamp);
 
-    // Drop fixes where coords.accuracy exceeds 25 m
-    if (!isFixAccurate(acc, MAX_ACCEPTABLE_ACCURACY_METERS)) {
-      setAccuracyStatus('red');
-      setDroppedFixCount((c) => c + 1);
-      return;
-    }
-
-    // Determine raw speed (m/s -> km/h)
-    let computedRawKmh = 0;
     const hasHardwareSpeed =
       coords.speed !== null &&
       coords.speed !== undefined &&
       !isNaN(coords.speed) &&
       coords.speed >= 0;
 
-    if (hasHardwareSpeed) {
-      computedRawKmh = msToKmh(coords.speed!);
-    } else if (prevFixRef.current) {
-      // Fallback: Haversine distance / time between fixes
-      const currentFix: GeoFix = {
+    const hwSpeedKmh = hasHardwareSpeed ? msToKmh(coords.speed!) : null;
+
+    // 1. Accuracy gate (reject if accuracy > 25 m), as now.
+    if (!isFixAccurate(acc, MAX_ACCEPTABLE_ACCURACY_METERS)) {
+      setAccuracyStatus('red');
+      setDroppedFixCount((c) => c + 1);
+      setDebug((prev) => ({
+        ...prev,
+        hardwareSpeedKmh: hwSpeedKmh,
+        rejectedAccuracy: prev.rejectedAccuracy + 1,
+      }));
+      return;
+    }
+
+    // 2. Hardware speed:
+    // If coords.speed is a valid number >= 0, use msToKmh(coords.speed), source "doppler".
+    // Otherwise call estimateFallbackSpeed(anchorRef.current, {lat, lon, timestamp, accuracy}),
+    // store the returned anchor, source "fallback" (or "none" when speedKmh is null).
+    let speedKmh: number | null = null;
+    let source: 'doppler' | 'fallback' | 'none' = 'none';
+
+    if (hasHardwareSpeed && hwSpeedKmh !== null) {
+      speedKmh = hwSpeedKmh;
+      source = 'doppler';
+    } else {
+      const currentAnchorFix: FallbackAnchor = {
         latitude: coords.latitude,
         longitude: coords.longitude,
         timestamp,
+        accuracy: acc,
       };
-      computedRawKmh = calculateFallbackSpeedKmh(prevFixRef.current, currentFix);
+      const result = estimateFallbackSpeed(anchorRef.current, currentAnchorFix);
+      anchorRef.current = result.anchor;
+      speedKmh = result.speedKmh;
+      source = speedKmh !== null ? 'fallback' : 'none';
     }
 
-    // 2. Reject any accepted fix where speed jumps more than 25 km/h versus
-    // the previous accepted fix within 1 second.
+    // 3. If speedKmh is null: do NOT feed the filter and do NOT refresh the accepted-fix watchdog timestamp. Return.
+    if (speedKmh === null) {
+      setDebug((prev) => ({
+        ...prev,
+        hardwareSpeedKmh: hwSpeedKmh,
+        speedSource: source,
+        rejectedUnknown: prev.rejectedUnknown + 1,
+      }));
+      return;
+    }
+
+    // 4. Jump rejection:
+    // If shouldRejectSpeedJump is true, increment jumpRejectStreakRef.
+    // If streak < 2, count as dropped and return.
+    // If streak >= 2, call kalmanFilter.reset() and accept this fix.
+    // After any non-rejected or reseeded fix set the streak to 0.
     if (lastAcceptedSpeedFixRef.current !== null) {
       const timeDeltaMs = timestamp - lastAcceptedSpeedFixRef.current.timestamp;
-      if (shouldRejectSpeedJump(computedRawKmh, lastAcceptedSpeedFixRef.current.speedKmh, timeDeltaMs)) {
-        setDroppedFixCount((c) => c + 1);
-        return;
+      if (shouldRejectSpeedJump(speedKmh, lastAcceptedSpeedFixRef.current.speedKmh, timeDeltaMs)) {
+        jumpRejectStreakRef.current += 1;
+        if (jumpRejectStreakRef.current < 2) {
+          setDroppedFixCount((c) => c + 1);
+          setDebug((prev) => ({
+            ...prev,
+            hardwareSpeedKmh: hwSpeedKmh,
+            speedSource: source,
+            rejectedJump: prev.rejectedJump + 1,
+          }));
+          return;
+        } else {
+          // Streak >= 2: baseline reset to overcome jump rejection stalls
+          kalmanFilterRef.current.reset();
+        }
       }
     }
 
-    // Accepted GPS Fix arrived! Update timestamp and mark signal active
+    jumpRejectStreakRef.current = 0;
+
+    // 5. On accept:
+    // Update lastAcceptedFixTimeRef and lastAcceptedSpeedFixRef,
+    // feed the Kalman filter with (rawKmh, accuracy),
+    // then { displayKmh, stopped } = applyStationaryHysteresis(filtered, isStoppedRef.current);
+    // isStoppedRef.current = stopped; display min(200, displayKmh).
     lastAcceptedFixTimeRef.current = timestamp;
-    lastAcceptedSpeedFixRef.current = { speedKmh: computedRawKmh, timestamp };
+    lastAcceptedSpeedFixRef.current = { speedKmh, timestamp };
     setIsGpsLost(false);
     setHasReceivedFirstFix(true);
     setAccuracyStatus(getAccuracyStatus(acc));
 
-    // Save valid fix coordinates for next fallback computation
-    prevFixRef.current = {
-      latitude: coords.latitude,
-      longitude: coords.longitude,
-      timestamp,
-    };
+    setRawSpeedKmh(speedKmh);
 
-    setRawSpeedKmh(computedRawKmh);
-
-    // 1. After any Kalman reset or at app launch, seed the filter with the
-    // first accepted fix's measured speed, not 0.
-    const filtered = kalmanFilterRef.current.update(computedRawKmh, acc);
+    const filtered = kalmanFilterRef.current.update(speedKmh, acc);
     setFilteredSpeedKmh(filtered);
 
-    // Threshold rule: below 2 km/h, display 0; clamp to max 200 km/h
-    const thresholded = applySpeedThreshold(filtered);
-    const clampedDisplay = Math.min(GAUGE_MAX_KMH, thresholded);
+    const { displayKmh, stopped } = applyStationaryHysteresis(
+      filtered,
+      isStoppedRef.current
+    );
+    isStoppedRef.current = stopped;
+
+    const clampedDisplay = Math.min(GAUGE_MAX_KMH, displayKmh);
     setDisplaySpeedKmh(clampedDisplay);
+
+    setDebug((prev) => ({
+      ...prev,
+      hardwareSpeedKmh: hwSpeedKmh,
+      speedSource: source,
+      accepted: prev.accepted + 1,
+    }));
   }, []);
 
   const handlePositionError = useCallback((error: GeolocationPositionError) => {
@@ -188,7 +262,6 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       return;
     }
 
-    // Query permissions API if available to preemptively check state
     if (navigator.permissions && navigator.permissions.query) {
       navigator.permissions
         .query({ name: 'geolocation' })
@@ -202,12 +275,9 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
             setPermissionStatus('granted');
           }
         })
-        .catch(() => {
-          // Permissions query might throw on some mobile webviews
-        });
+        .catch(() => {});
     }
 
-    // Required specs: enableHighAccuracy true, maximumAge 0
     const options: PositionOptions = {
       enableHighAccuracy: true,
       maximumAge: 0,
@@ -229,7 +299,9 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
 
   const retry = useCallback(() => {
     kalmanFilterRef.current.reset();
-    prevFixRef.current = null;
+    anchorRef.current = null;
+    isStoppedRef.current = true;
+    jumpRejectStreakRef.current = 0;
     lastAcceptedFixTimeRef.current = null;
     lastAcceptedSpeedFixRef.current = null;
     setRawSpeedKmh(0);
@@ -240,6 +312,14 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     setAccuracy(null);
     setAccuracyStatus('red');
     setErrorMessage(null);
+    setDebug({
+      hardwareSpeedKmh: null,
+      speedSource: 'none',
+      accepted: 0,
+      rejectedAccuracy: 0,
+      rejectedJump: 0,
+      rejectedUnknown: 0,
+    });
     startWatching();
   }, [startWatching]);
 
@@ -250,6 +330,8 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   // 3-second watchdog timer:
   // If no accepted GPS fix arrives for 3 seconds, display '--' and set the dot red.
   // Never hold the last speed.
+  // Watchdog removes the line that clears fallback position (keeps anchorRef).
+  // Also resets isStoppedRef to true and jumpRejectStreakRef to 0.
   useEffect(() => {
     const checkTimeout = () => {
       const now = Date.now();
@@ -261,13 +343,13 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
         setAccuracy(null);
         kalmanFilterRef.current.reset();
         lastAcceptedSpeedFixRef.current = null;
-        prevFixRef.current = null;
+        isStoppedRef.current = true;
+        jumpRejectStreakRef.current = 0;
       }
     };
 
     const interval = window.setInterval(checkTimeout, 100);
 
-    // Testing helper for headless browser automated verification
     if (typeof window !== 'undefined') {
       (window as unknown as { __simulateGpsDropout?: () => void }).__simulateGpsDropout = () => {
         if (simTimerRef.current !== null) {
@@ -293,7 +375,7 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     };
   }, [startWatching, stopWatching, isSimulating]);
 
-  // Simulation mode (for tests or desktop preview)
+  // Simulation mode (unchanged)
   useEffect(() => {
     if (!isSimulating) {
       if (simTimerRef.current !== null) {
@@ -315,7 +397,6 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
 
     const interval = window.setInterval(() => {
       t += 0.2;
-      // Motorcycle profile: idle -> hard acceleration to 60 -> cruise to 110 -> burst to 165 -> brake to 0
       const cycle = t % 32;
       if (cycle < 4) {
         simTarget = 0;
@@ -329,12 +410,10 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
         simTarget = Math.max(0, 172 - (cycle - 25) * 25);
       }
 
-      // Add realistic vibration noise
       const vibration = (Math.random() - 0.5) * 3.5;
       const raw = Math.max(0, simTarget + vibration);
       setRawSpeedKmh(raw);
 
-      // Pass through Kalman filter
       const filtered = kalmanFilterRef.current.update(raw, 4.2);
       setFilteredSpeedKmh(filtered);
 
@@ -370,5 +449,6 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     retry,
     isSimulating,
     toggleSimulation,
+    debug,
   };
 }

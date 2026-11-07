@@ -9,6 +9,18 @@ export interface GeoFix {
   timestamp: number; // ms epoch
 }
 
+export interface FallbackAnchor {
+  latitude: number;
+  longitude: number;
+  timestamp: number; // ms
+  accuracy: number; // m
+}
+
+export interface FallbackResult {
+  speedKmh: number | null;
+  anchor: FallbackAnchor;
+}
+
 export type AccuracyLevel = 'green' | 'yellow' | 'red';
 
 export const MAX_ACCEPTABLE_ACCURACY_METERS = 25;
@@ -16,6 +28,13 @@ export const MIN_DISPLAY_SPEED_KMH = 2;
 export const GAUGE_MAX_KMH = 200;
 export const KMH_TO_MPH_FACTOR = 0.621371192237334;
 export const GPS_TIMEOUT_MS = 3000;
+
+export const FALLBACK_MIN_MOVE_METERS = 6;
+export const FALLBACK_STILL_CONFIRM_MS = 3000;
+export const FALLBACK_MAX_GAP_MS = 30000;
+
+export const STOPPED_BELOW_KMH = 5;
+export const MOVING_ABOVE_KMH = 7;
 
 /**
  * Checks if GPS has timed out (no accepted fix for >= 3000 ms).
@@ -57,28 +76,56 @@ export function haversineDistance(
 }
 
 /**
- * Fallback speed calculation in km/h based on distance and elapsed time between GPS fixes.
+ * Estimates fallback speed from coordinates when hardware Doppler speed is absent.
+ * Uses an anchor point and an uncertainty radius to reject stationary jitter.
  */
-export function calculateFallbackSpeedKmh(
-  prevFix: GeoFix,
-  currentFix: GeoFix
-): number {
-  const timeElapsedSeconds = (currentFix.timestamp - prevFix.timestamp) / 1000;
-
-  // Reject invalid, backwards, or excessively stale time gaps (> 30s)
-  if (timeElapsedSeconds <= 0.05 || timeElapsedSeconds > 30) {
-    return 0;
+export function estimateFallbackSpeed(
+  anchor: FallbackAnchor | null,
+  fix: FallbackAnchor
+): FallbackResult {
+  // - anchor null -> { speedKmh: null, anchor: fix }
+  if (anchor === null) {
+    return { speedKmh: null, anchor: fix };
   }
 
-  const distanceMeters = haversineDistance(
-    prevFix.latitude,
-    prevFix.longitude,
-    currentFix.latitude,
-    currentFix.longitude
+  // - dtMs = fix.timestamp - anchor.timestamp
+  const dtMs = fix.timestamp - anchor.timestamp;
+
+  // dtMs <= 0 -> { null, keep anchor }
+  if (dtMs <= 0) {
+    return { speedKmh: null, anchor };
+  }
+
+  // dtMs > 30000 -> { null, anchor: fix }
+  if (dtMs > FALLBACK_MAX_GAP_MS) {
+    return { speedKmh: null, anchor: fix };
+  }
+
+  // - distance = haversineDistance(anchor, fix)
+  //   radius = max(6, 2 * max(anchor.accuracy, fix.accuracy))
+  const distance = haversineDistance(
+    anchor.latitude,
+    anchor.longitude,
+    fix.latitude,
+    fix.longitude
+  );
+  const radius = Math.max(
+    FALLBACK_MIN_MOVE_METERS,
+    2 * Math.max(anchor.accuracy, fix.accuracy)
   );
 
-  const speedMps = distanceMeters / timeElapsedSeconds;
-  return msToKmh(speedMps);
+  // - distance <= radius -> speedKmh = (dtMs >= 3000 ? 0 : null), KEEP the same anchor (it must not drift)
+  if (distance <= radius) {
+    const speedKmh = dtMs >= FALLBACK_STILL_CONFIRM_MS ? 0 : null;
+    return { speedKmh, anchor };
+  }
+
+  // - distance > radius -> speedKmh = msToKmh(distance / (dtMs/1000)), anchor = fix
+  const speedMps = distance / (dtMs / 1000);
+  return {
+    speedKmh: msToKmh(speedMps),
+    anchor: fix,
+  };
 }
 
 /**
@@ -111,7 +158,31 @@ export function isFixAccurate(
 }
 
 /**
- * Applies speed threshold rules:
+ * Applies stationary hysteresis to eliminate low-speed jitter while stopped:
+ * - NaN / infinite / negative -> { displayKmh: 0, stopped: true }
+ * - stopped = wasStopped ? speed <= 7 : speed < 5
+ * - displayKmh = stopped ? 0 : speedKmh
+ */
+export function applyStationaryHysteresis(
+  speedKmh: number,
+  wasStopped: boolean
+): { displayKmh: number; stopped: boolean } {
+  if (isNaN(speedKmh) || !isFinite(speedKmh) || speedKmh < 0) {
+    return { displayKmh: 0, stopped: true };
+  }
+
+  const stopped = wasStopped
+    ? speedKmh <= MOVING_ABOVE_KMH
+    : speedKmh < STOPPED_BELOW_KMH;
+
+  return {
+    displayKmh: stopped ? 0 : speedKmh,
+    stopped,
+  };
+}
+
+/**
+ * Legacy speed threshold function (used by simulation mode):
  * - Below 2 km/h, display 0.
  * - Negative or NaN speeds become 0.
  */
@@ -131,7 +202,12 @@ export function applySpeedThreshold(speedKmh: number): number {
 export function getAccuracyStatus(
   accuracy: number | null | undefined
 ): AccuracyLevel {
-  if (accuracy === null || accuracy === undefined || isNaN(accuracy) || accuracy > MAX_ACCEPTABLE_ACCURACY_METERS) {
+  if (
+    accuracy === null ||
+    accuracy === undefined ||
+    isNaN(accuracy) ||
+    accuracy > MAX_ACCEPTABLE_ACCURACY_METERS
+  ) {
     return 'red';
   }
   if (accuracy <= 10) {
@@ -146,13 +222,6 @@ export const SPEED_JUMP_MAX_TIME_DELTA_MS = 1000;
 /**
  * Rejects any accepted fix where speed jumps more than 25 km/h versus
  * the previous accepted fix within 1 second.
- *
- * @param currentSpeedKmh The candidate measured speed for the new fix (km/h)
- * @param prevAcceptedSpeedKmh The measured speed of the previous accepted fix (null if first fix)
- * @param timeDeltaMs Elapsed time in milliseconds between the fixes
- * @param maxJumpKmh Maximum allowable speed jump within 1 second (default 25 km/h)
- * @param maxTimeDeltaMs Time window for jump rejection (default 1000 ms)
- * @returns true if the fix must be rejected due to an excessive jump within 1s
  */
 export function shouldRejectSpeedJump(
   currentSpeedKmh: number,
@@ -161,15 +230,12 @@ export function shouldRejectSpeedJump(
   maxJumpKmh = MAX_SPEED_JUMP_KMH,
   maxTimeDeltaMs = SPEED_JUMP_MAX_TIME_DELTA_MS
 ): boolean {
-  // First fix at launch or after reset has no predecessor, cannot jump
   if (prevAcceptedSpeedKmh === null) {
     return false;
   }
-  // The rule strictly applies within 1 second (0 <= delta <= 1000ms)
   if (timeDeltaMs < 0 || timeDeltaMs > maxTimeDeltaMs) {
     return false;
   }
   const speedDifference = Math.abs(currentSpeedKmh - prevAcceptedSpeedKmh);
   return speedDifference > maxJumpKmh;
 }
-

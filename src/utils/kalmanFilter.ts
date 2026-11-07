@@ -5,20 +5,20 @@
 
 export interface KalmanFilterConfig {
   /**
-   * Process noise covariance (Q):
-   * High process noise allows rapid reaction to real throttle twist & hard braking.
-   */
+    * Process noise covariance (Q):
+    * High process noise allows rapid reaction to real throttle twist & hard braking.
+    */
   processNoise: number;
 
   /**
-   * Base measurement noise covariance (R):
-   * Dampens micro-oscillations, vibration, and GPS multipath jitter.
-   */
+    * Base measurement noise covariance (R):
+    * Dampens micro-oscillations, vibration, and GPS multipath jitter.
+    */
   measurementNoise: number;
 
   /**
-   * Initial estimation error covariance (P).
-   */
+    * Initial estimation error covariance (P).
+    */
   initialError: number;
 }
 
@@ -71,10 +71,13 @@ export class SpeedKalmanFilter {
       effectiveR = this.r * scale;
     }
 
+    const innovation = measurement - this.x;
+    const q = Math.abs(innovation) > 15 ? this.q * 8 : this.q;
+
     // 1. Prediction step:
     // x_prior = x (constant velocity model between instantaneous GPS fixes)
     // p_prior = p + Q
-    const pPrior = this.p + this.q;
+    const pPrior = this.p + q;
 
     // 2. Innovation & Kalman Gain:
     // K = p_prior / (p_prior + R)
