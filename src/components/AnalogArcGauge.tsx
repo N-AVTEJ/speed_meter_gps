@@ -14,165 +14,165 @@ export const AnalogArcGauge: React.FC<AnalogArcGaugeProps> = ({ speedKmh, unit }
   const currentSpeed = hasSpeed ? (isMph ? kmhToMph(speedKmh) : speedKmh) : 0;
   const maxSpeed = isMph ? 125 : 200;
 
-  // Gauge Geometry: Center at (250, 250), radius 185
-  // Sweep from 140° (bottom-left) to 400° (bottom-right) -> 260° sweep
+  // Center (250, 250), Thick Segmented Arc Gauge: Outer R=205, Inner R=172
   const cx = 250;
   const cy = 250;
-  const radius = 185;
+  const outerR = 205;
+  const innerR = 172;
   const startAngle = 140;
   const totalSweep = 260;
 
-  // Clamp speed for needle position: rests at 0 if no signal/fix
+  // Clamped speed & fraction
   const clampedSpeed = hasSpeed ? Math.max(0, Math.min(maxSpeed, currentSpeed)) : 0;
   const fraction = hasSpeed ? clampedSpeed / maxSpeed : 0;
   const needleAngle = startAngle + fraction * totalSweep;
 
-  // Arc paths
   const toRad = (deg: number) => (deg * Math.PI) / 180;
   const polarToCartesian = (angleDeg: number, r: number) => ({
     x: cx + r * Math.cos(toRad(angleDeg)),
     y: cy + r * Math.sin(toRad(angleDeg)),
   });
 
-  // Background track arc
-  const startPt = polarToCartesian(startAngle, radius);
-  const endPt = polarToCartesian(startAngle + totalSweep, radius);
-  const bgArcPath = `M ${startPt.x} ${startPt.y} A ${radius} ${radius} 0 1 1 ${endPt.x} ${endPt.y}`;
+  // Generate 36 thick angular segments along the arc
+  const totalSegments = 36;
+  const segments = useMemo(() => {
+    const segList = [];
+    const segSpan = totalSweep / totalSegments;
+    const gap = 1.6; // angular gap in degrees
 
-  // Active glowing orange speed arc
-  const activePt = polarToCartesian(needleAngle, radius);
-  const activeSweepDeg = fraction * totalSweep;
-  const activeLargeArc = activeSweepDeg > 180 ? 1 : 0;
-  const activeArcPath =
-    fraction > 0.005
-      ? `M ${startPt.x} ${startPt.y} A ${radius} ${radius} 0 ${activeLargeArc} 1 ${activePt.x} ${activePt.y}`
-      : '';
+    for (let i = 0; i < totalSegments; i++) {
+      const segStart = startAngle + i * segSpan + gap / 2;
+      const segEnd = startAngle + (i + 1) * segSpan - gap / 2;
+      const segFrac = (i + 1) / totalSegments;
 
-  // Tick marks generator
+      // 4 corners of the thick angular trapezoid segment
+      const p1 = polarToCartesian(segStart, outerR);
+      const p2 = polarToCartesian(segEnd, outerR);
+      const p3 = polarToCartesian(segEnd, innerR);
+      const p4 = polarToCartesian(segStart, innerR);
+
+      // SVG path for the segment
+      const d = `M ${p1.x} ${p1.y} A ${outerR} ${outerR} 0 0 1 ${p2.x} ${p2.y} L ${p3.x} ${p3.y} A ${innerR} ${innerR} 0 0 0 ${p4.x} ${p4.y} Z`;
+
+      // High-speed powerband redline (top 30% of gauge)
+      const isRedline = segFrac >= 0.72;
+
+      segList.push({
+        index: i,
+        d,
+        segFrac,
+        isRedline,
+      });
+    }
+    return segList;
+  }, [totalSweep, startAngle, outerR, innerR]);
+
+  // Major tick marks with numbers
   const ticks = useMemo(() => {
     const list = [];
-    const step = isMph ? 10 : 20;
-    const minorStep = isMph ? 5 : 10;
-    const totalTicks = Math.round(maxSpeed / minorStep);
+    const step = isMph ? 20 : 20;
+    const count = Math.floor(maxSpeed / step);
 
-    for (let i = 0; i <= totalTicks; i++) {
-      const val = i * minorStep;
-      if (val > maxSpeed) break;
+    for (let i = 0; i <= count; i++) {
+      const val = i * step;
       const frac = val / maxSpeed;
       const angle = startAngle + frac * totalSweep;
-      const isMajor = val % step === 0;
+      const pOuter = polarToCartesian(angle, outerR + 6);
+      const pInner = polarToCartesian(angle, outerR + 14);
+      const pText = polarToCartesian(angle, outerR + 26);
 
-      const outerR = radius - 8;
-      const innerR = isMajor ? radius - 30 : radius - 20;
-
-      const pOuter = polarToCartesian(angle, outerR);
-      const pInner = polarToCartesian(angle, innerR);
-
-      // Text position for major ticks
-      const textR = radius - 48;
-      const pText = polarToCartesian(angle, textR);
-
-      // High-speed warning zone (> 140 km/h or > 90 mph)
-      const isDangerZone = isMph ? val >= 90 : val >= 150;
+      const isDanger = isMph ? val >= 90 : val >= 150;
 
       list.push({
         val,
-        isMajor,
-        isDangerZone,
         x1: pOuter.x,
         y1: pOuter.y,
         x2: pInner.x,
         y2: pInner.y,
         tx: pText.x,
         ty: pText.y,
+        isDanger,
       });
     }
     return list;
-  }, [isMph, maxSpeed]);
+  }, [isMph, maxSpeed, startAngle, totalSweep, outerR]);
 
+  const activeSegmentIndex = Math.floor(fraction * totalSegments);
   const roundedSpeed = Math.round(currentSpeed);
 
+  // Subtle 1px vibration shake above 120 km/h (or ~75 mph)
+  const isHighSpeed = hasSpeed && (speedKmh || 0) > 120;
+
   return (
-    <div className="relative flex flex-col items-center justify-center w-full max-w-[540px] aspect-square mx-auto select-none p-2 sm:p-4">
-      {/* Outer dark glass bezel */}
-      <div className="absolute inset-0 rounded-full bg-gradient-to-br from-[#1c212d]/80 via-[#0d1017]/90 to-[#07080a] p-[6px] shadow-2xl shadow-black/80 border border-white/10 backdrop-blur-2xl">
-        <div className="w-full h-full rounded-full bg-[#080a0f] relative overflow-hidden border border-[#212634]">
-          {/* Glass reflection highlight */}
-          <div className="absolute top-0 left-0 right-0 h-1/2 bg-gradient-to-b from-white/8 via-white/2 to-transparent pointer-events-none rounded-t-full" />
+    <div className="relative flex flex-col items-center justify-center w-full max-w-[500px] aspect-square mx-auto select-none p-2">
+      {/* Outer cockpit carbon bezel ring */}
+      <div className="absolute inset-0 rounded-full bg-gradient-to-b from-[#181a24] via-[#090b10] to-[#050608] p-[3px] shadow-2xl border border-white/10">
+        <div className="w-full h-full rounded-full bg-[#08090d] relative overflow-hidden border border-[#1e2332]/80">
+          {/* Subtle top reflection line */}
+          <div className="absolute top-0 left-1/4 right-1/4 h-[1px] bg-gradient-to-r from-transparent via-white/20 to-transparent" />
         </div>
       </div>
 
-      {/* SVG Arc Dial */}
+      {/* SVG Thick Segmented Arc Gauge */}
       <svg
         viewBox="0 0 500 500"
         className="relative z-10 w-full h-full overflow-visible pointer-events-none"
         aria-hidden="true"
       >
         <defs>
-          <linearGradient id="neonOrangeGrad" x1="0%" y1="100%" x2="100%" y2="0%">
-            <stop offset="0%" stopColor="#ff3b00" />
-            <stop offset="60%" stopColor="#ff6b00" />
-            <stop offset="100%" stopColor="#ffa600" />
+          <linearGradient id="needleTrailGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stopColor="#ff3b00" stopOpacity="0.9" />
+            <stop offset="100%" stopColor="#ff7700" stopOpacity="0.2" />
           </linearGradient>
 
-          <filter id="neonGlow" x="-30%" y="-30%" width="160%" height="160%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur1" />
-            <feGaussianBlur in="SourceGraphic" stdDeviation="14" result="blur2" />
-            <feMerge>
-              <feMergeNode in="blur2" />
-              <feMergeNode in="blur1" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-
-          <filter id="needleGlow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="5" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
+          <linearGradient id="sharpNeedleGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+            <stop offset="0%" stopColor="#ff1744" />
+            <stop offset="50%" stopColor="#ff6d00" />
+            <stop offset="100%" stopColor="#ffffff" />
+          </linearGradient>
         </defs>
 
-        {/* Outer subtle concentric guide rings */}
-        <circle cx={cx} cy={cy} r={radius + 14} fill="none" stroke="#181d27" strokeWidth="2" />
-        <circle cx={cx} cy={cy} r={radius - 38} fill="none" stroke="#121620" strokeWidth="1.5" strokeDasharray="3 4" />
+        {/* Thick Segmented Arc Segments */}
+        {segments.map((seg) => {
+          const isLit = hasSpeed && seg.index <= activeSegmentIndex;
+          // Short glowing trail behind the needle (last 3 lit segments)
+          const isTrail = isLit && seg.index >= activeSegmentIndex - 3;
 
-        {/* Inactive Arc Track */}
-        <path
-          d={bgArcPath}
-          fill="none"
-          stroke="#1b212d"
-          strokeWidth="14"
-          strokeLinecap="round"
-        />
+          let fillColor = '#131620';
+          let strokeColor = '#1f2434';
+          let opacity = '0.55';
 
-        {/* Danger zone accent track (end of arc) */}
-        <path
-          d={`M ${polarToCartesian(startAngle + totalSweep * 0.75, radius).x} ${polarToCartesian(startAngle + totalSweep * 0.75, radius).y} A ${radius} ${radius} 0 0 1 ${endPt.x} ${endPt.y}`}
-          fill="none"
-          stroke="#ef4444"
-          strokeWidth="4"
-          strokeDasharray="4 6"
-          opacity="0.6"
-        />
+          if (isLit) {
+            opacity = '1.0';
+            if (seg.isRedline) {
+              fillColor = '#ff1744';
+              strokeColor = '#ff5252';
+            } else if (isTrail) {
+              fillColor = '#ff6d00';
+              strokeColor = '#ffa000';
+            } else {
+              fillColor = '#ff5500';
+              strokeColor = '#ff7700';
+            }
+          }
 
-        {/* Active Neon Orange Arc */}
-        {activeArcPath && (
-          <path
-            d={activeArcPath}
-            fill="none"
-            stroke="url(#neonOrangeGrad)"
-            strokeWidth="14"
-            strokeLinecap="round"
-            filter="url(#neonGlow)"
-            style={{
-              transition: 'all 0.15s cubic-bezier(0.1, 0.9, 0.2, 1)',
-            }}
-          />
-        )}
+          return (
+            <path
+              key={seg.index}
+              d={seg.d}
+              fill={fillColor}
+              stroke={strokeColor}
+              strokeWidth="1"
+              opacity={opacity}
+              style={{
+                transition: 'fill 0.08s ease-out, opacity 0.08s ease-out',
+                filter: isTrail ? 'drop-shadow(0 0 6px rgba(255,109,0,0.8))' : 'none',
+              }}
+            />
+          );
+        })}
 
-        {/* Dial Ticks & Numerical Labels */}
+        {/* Dial Numerical Labels & Tick Lines */}
         {ticks.map((t) => (
           <g key={t.val}>
             <line
@@ -180,100 +180,83 @@ export const AnalogArcGauge: React.FC<AnalogArcGaugeProps> = ({ speedKmh, unit }
               y1={t.y1}
               x2={t.x2}
               y2={t.y2}
-              stroke={
-                t.isDangerZone
-                  ? '#ef4444'
-                  : t.isMajor
-                  ? '#f3f4f6'
-                  : '#4b5563'
-              }
-              strokeWidth={t.isMajor ? 4.5 : 2}
+              stroke={t.isDanger ? '#ff1744' : '#4a5568'}
+              strokeWidth="2.5"
               strokeLinecap="round"
             />
-            {t.isMajor && (
-              <text
-                x={t.tx}
-                y={t.ty + 6}
-                textAnchor="middle"
-                fill={t.isDangerZone ? '#fca5a5' : '#ffffff'}
-                fontSize={isMph ? '17' : '18'}
-                fontWeight="800"
-                fontFamily="system-ui, -apple-system, sans-serif"
-                className="select-none"
-              >
-                {t.val}
-              </text>
-            )}
+            <text
+              x={t.tx}
+              y={t.ty + 4}
+              textAnchor="middle"
+              fill={t.isDanger ? '#ff8a80' : '#e2e8f0'}
+              fontSize="14"
+              fontWeight="800"
+              fontFamily="'Barlow Condensed', sans-serif"
+              fontStyle="italic"
+              className="select-none"
+            >
+              {t.val}
+            </text>
           </g>
         ))}
 
-        {/* Animated Analog Needle */}
-        {/* Needle is rotated around (cx, cy) */}
+        {/* Sharp Angular Superbike Needle with Short Glowing Trail */}
+        {/* Rotated around (cx, cy) */}
         <g
           transform={`rotate(${needleAngle}, ${cx}, ${cy})`}
           style={{
             transition: 'transform 0.14s cubic-bezier(0.15, 0.9, 0.25, 1)',
           }}
         >
-          {/* Glowing Orange Needle Blade */}
+          {/* Glowing Trail Blade behind needle */}
           <polygon
-            points={`${cx - 5},${cy - 5} ${cx + radius - 10},${cy} ${cx - 5},${cy + 5}`}
-            fill="url(#neonOrangeGrad)"
-            filter="url(#needleGlow)"
+            points={`${cx - 10},${cy - 2} ${cx + innerR + 15},${cy - 6} ${cx + innerR + 25},${cy} ${cx - 4},${cy + 2}`}
+            fill="url(#needleTrailGrad)"
+            opacity="0.8"
           />
-          {/* High-contrast crisp white needle core spine */}
+
+          {/* Precision Sharp Angular Needle Blade */}
+          <polygon
+            points={`${cx - 12},${cy - 5} ${cx + innerR + 28},${cy} ${cx - 12},${cy + 5}`}
+            fill="url(#sharpNeedleGrad)"
+          />
+
+          {/* White-Hot Razor Center Spine */}
           <line
-            x1={cx}
+            x1={cx - 5}
             y1={cy}
-            x2={cx + radius - 12}
+            x2={cx + innerR + 26}
             y2={cy}
             stroke="#ffffff"
-            strokeWidth="2.5"
+            strokeWidth="2"
             strokeLinecap="round"
           />
-          {/* Subtle counterbalance tail */}
+
+          {/* Angular Counterweight Tail */}
           <polygon
-            points={`${cx - 28},${cy - 3} ${cx},${cy - 4} ${cx},${cy + 4} ${cx - 28},${cy + 3}`}
-            fill="#ff5500"
-            opacity="0.8"
+            points={`${cx - 26},${cy - 4} ${cx - 6},${cy - 5} ${cx - 6},${cy + 5} ${cx - 26},${cy + 4}`}
+            fill="#ff1744"
           />
         </g>
 
-        {/* Center Hub Glass Disc */}
-        <circle
-          cx={cx}
-          cy={cy}
-          r="105"
-          fill="#0a0d14"
-          stroke="#ff6b00"
-          strokeWidth="3"
-          filter="url(#neonGlow)"
-        />
-        <circle
-          cx={cx}
-          cy={cy}
-          r="103"
-          fill="#090b10"
-          stroke="#252b3b"
-          strokeWidth="2"
-        />
+        {/* Center Hub Disc */}
+        <circle cx={cx} cy={cy} r="65" fill="#0b0e14" stroke="#ff5500" strokeWidth="2.5" />
+        <circle cx={cx} cy={cy} r="60" fill="#07080b" stroke="#1c2130" strokeWidth="1.5" />
       </svg>
 
-      {/* Massive Center Digital Speedometer Display */}
+      {/* Center Digital Speed Number & JetBrains Mono Unit */}
       <div
         className="absolute z-20 flex flex-col items-center justify-center pointer-events-none"
-        style={{ top: '48%', transform: 'translateY(-50%)' }}
+        style={{ top: '50%', transform: 'translateY(-50%)' }}
       >
         <span
-          className="font-black tracking-tight text-white tabular-nums leading-none select-none drop-shadow-2xl text-7xl sm:text-8xl md:text-[104px]"
-          style={{
-            fontVariantNumeric: 'tabular-nums',
-            textShadow: '0 0 40px rgba(255, 107, 0, 0.35), 0 4px 12px rgba(0,0,0,0.9)',
-          }}
+          className={`font-superbike leading-none select-none tabular-nums text-8xl sm:text-9xl md:text-[112px] ${
+            !hasSpeed ? 'speed-dim-pulse text-gray-400' : 'speed-white-hot'
+          } ${isHighSpeed ? 'speed-shake' : ''}`}
         >
           {hasSpeed ? roundedSpeed : '--'}
         </span>
-        <span className="mt-1 sm:mt-2 text-xl sm:text-2xl font-black tracking-widest text-[#ff6b00] uppercase glow-neon-text">
+        <span className="font-unit mt-1 text-sm sm:text-base font-bold tracking-widest text-[#ff6d00] uppercase">
           {unit}
         </span>
       </div>

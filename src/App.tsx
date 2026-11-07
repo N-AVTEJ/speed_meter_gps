@@ -1,6 +1,6 @@
 /**
  * Apex Moto Speedo - GPS Speedometer PWA for Motorcycles
- * Open Source, MIT License
+ * Superbike TFT Dashboard Edition (Open Source, MIT)
  * 
  * Display only. No backend, no accounts, no ads, no subscriptions.
  */
@@ -10,6 +10,8 @@ import { useGeolocationSpeed } from './hooks/useGeolocationSpeed';
 import { useWakeLock } from './hooks/useWakeLock';
 import { AnalogArcGauge, SpeedUnit } from './components/AnalogArcGauge';
 import { GpsStatusBadge } from './components/GpsStatusBadge';
+import { ShiftLightStrip } from './components/ShiftLightStrip';
+import { SpeedReactiveEnvironment } from './components/SpeedReactiveEnvironment';
 import { DashboardControls } from './components/DashboardControls';
 import { PermissionDeniedModal } from './components/PermissionDeniedModal';
 import { PWAInstallButton } from './components/PWAInstallButton';
@@ -19,7 +21,7 @@ export default function App() {
   const [unit, setUnit] = useState<SpeedUnit>('km/h');
   const [isHudMirrored, setIsHudMirrored] = useState<boolean>(false);
 
-  // GPS Speed & Kalman Filter hook
+  // GPS Speed & Kalman Filter hook (logic untouched)
   const {
     displaySpeedKmh,
     accuracy,
@@ -50,64 +52,64 @@ export default function App() {
 
   return (
     <main
-      className="relative min-h-screen w-full bg-[#07080a] text-white flex flex-col justify-between overflow-hidden"
+      className="relative min-h-screen w-full bg-carbon text-white flex flex-col justify-between overflow-hidden select-none"
       style={{
-        paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
-        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
-        paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
-        paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+        paddingTop: 'max(0.5rem, env(safe-area-inset-top, 0px))',
+        paddingBottom: 'max(0.5rem, env(safe-area-inset-bottom, 0px))',
+        paddingLeft: 'max(0.5rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(0.5rem, env(safe-area-inset-right, 0px))',
       }}
     >
-      {/* Subtle ambient cockpit radial background */}
-      <div
-        className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#1c2233]/40 via-[#0a0d14]/70 to-[#050608]"
-        aria-hidden="true"
-      />
+      {/* Speed-Reactive Environment: Diagonal streaks & dynamic edge vignette */}
+      <SpeedReactiveEnvironment speedKmh={displaySpeedKmh} maxSpeedKmh={200} />
 
-      {/* Top Header Bar */}
-      <header className="relative z-30 w-full max-w-5xl mx-auto px-4 pt-2 sm:pt-4 flex items-center justify-between gap-4">
-        {/* GPS Accuracy Dot & Status */}
-        <div className="flex items-center gap-3">
+      {/* Top Shift-Light Strip: 20 segmented LEDs across the screen */}
+      <header className="relative z-30 w-full flex flex-col items-center pt-1">
+        <ShiftLightStrip speedKmh={displaySpeedKmh} maxSpeedKmh={200} />
+
+        {/* Minimal Corner Indicators */}
+        <div className="w-full max-w-5xl px-4 pt-1 flex items-center justify-between gap-2">
+          {/* Top-Left: Minimal GPS Dot Status */}
           <GpsStatusBadge
             status={accuracyStatus}
             accuracy={accuracy}
             droppedCount={droppedFixCount}
             hasReceivedFirstFix={hasReceivedFirstFix}
           />
-        </div>
 
-        {/* Brand & PWA Install Button */}
-        <div className="flex items-center gap-3">
-          <PWAInstallButton />
-          <div className="hidden sm:flex flex-col items-end text-right">
-            <span className="text-xs font-black tracking-widest text-[#ff6a00] uppercase">
-              APEX MOTO
-            </span>
-            <span className="text-[10px] font-bold tracking-widest text-gray-400 uppercase">
-              GPS SPEEDO
-            </span>
+          {/* Top-Right: Minimal Brand & PWA Install */}
+          <div className="flex items-center gap-2">
+            <PWAInstallButton />
+            <div className="flex items-center gap-1.5 opacity-60">
+              <span className="font-unit text-[10px] font-black tracking-widest text-[#ff6d00] uppercase">
+                APEX
+              </span>
+              <span className="font-unit text-[9px] font-bold tracking-widest text-gray-400 uppercase">
+                TFT
+              </span>
+            </div>
           </div>
         </div>
       </header>
 
-      {/* Center Gauge Viewport - Flips horizontally in HUD Mirror mode */}
+      {/* Center Gauge Viewport - Horizontally flipped in HUD Mirror mode */}
       <section
-        className={`relative z-20 flex-1 flex flex-col items-center justify-center p-2 sm:p-4 transition-transform duration-300 ${
+        className={`relative z-20 flex-1 flex flex-col items-center justify-center p-2 transition-transform duration-300 ${
           isHudMirrored ? 'hud-mirrored' : ''
         }`}
         aria-label="Speedometer Display"
       >
         {isHudMirrored && (
-          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-[#ff5500]/20 border border-[#ff6a00]/50 text-xs font-black uppercase tracking-widest text-[#ff8800]">
-            HUD Windshield Mirror
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-30 px-3 py-1 rounded-full bg-[#ff5500]/25 border border-[#ff6d00]/60 text-[11px] font-unit font-black uppercase tracking-widest text-[#ff8800]">
+            HUD MIRROR
           </div>
         )}
 
         <AnalogArcGauge speedKmh={displaySpeedKmh} unit={unit} />
       </section>
 
-      {/* Bottom Controls Bar: Two Toggles Only */}
-      <div className="relative z-30 pb-4 sm:pb-6">
+      {/* Bottom Controls Bar: Minimal Corner-Tucked Toggles */}
+      <footer className="relative z-30 pb-2">
         <DashboardControls
           unit={unit}
           onToggleUnit={handleToggleUnit}
@@ -115,7 +117,7 @@ export default function App() {
           onToggleHud={handleToggleHud}
           wakeLockActive={isWakeLockActive}
         />
-      </div>
+      </footer>
 
       {/* Offline Status Toast */}
       <OfflineIndicator />
