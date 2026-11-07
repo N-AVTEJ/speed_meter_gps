@@ -6,6 +6,9 @@ import {VitePWA} from 'vite-plugin-pwa';
 
 export default defineConfig(() => {
   return {
+    build: {
+      target: ['es2020', 'chrome87', 'safari14'],
+    },
     plugins: [
       react(),
       tailwindcss(),
@@ -45,7 +48,12 @@ export default defineConfig(() => {
           ],
         },
         workbox: {
-          globPatterns: ['**/*.{js,css,html,ico,png,svg,woff,woff2}'],
+          skipWaiting: true,
+          clientsClaim: true,
+          cleanupOutdatedCaches: true,
+          // Exclude html from precache to ensure index.html is never locked in a stale cache-first loop
+          globPatterns: ['**/*.{js,css,ico,png,svg,woff,woff2}'],
+          navigateFallback: null,
         },
         devOptions: {
           enabled: true,

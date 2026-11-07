@@ -262,20 +262,29 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       return;
     }
 
-    if (navigator.permissions && navigator.permissions.query) {
-      navigator.permissions
-        .query({ name: 'geolocation' })
-        .then((permission) => {
-          if (permission.state === 'denied') {
-            setPermissionStatus('denied');
-            setErrorMessage(
-              'Location permission was denied. Please allow location access in browser site settings.'
-            );
-          } else if (permission.state === 'granted') {
-            setPermissionStatus('granted');
-          }
-        })
-        .catch(() => {});
+    if (
+      typeof navigator !== 'undefined' &&
+      'permissions' in navigator &&
+      navigator.permissions &&
+      typeof navigator.permissions.query === 'function'
+    ) {
+      try {
+        navigator.permissions
+          .query({ name: 'geolocation' })
+          .then((permission) => {
+            if (permission.state === 'denied') {
+              setPermissionStatus('denied');
+              setErrorMessage(
+                'Location permission was denied. Please allow location access in browser site settings.'
+              );
+            } else if (permission.state === 'granted') {
+              setPermissionStatus('granted');
+            }
+          })
+          .catch(() => {});
+      } catch {
+        // Some mobile web engines (e.g. Safari iOS < 16) throw synchronously on 'geolocation'
+      }
     }
 
     const options: PositionOptions = {

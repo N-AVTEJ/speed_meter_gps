@@ -1,5 +1,19 @@
 @import "tailwindcss";
 
+/* Direct root element styling for older browser fallback without @layer dependency */
+html, body {
+  background-color: #07070a;
+  color: #ffffff;
+  margin: 0;
+  padding: 0;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: manipulation;
+  overflow-x: hidden;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
 @layer base {
   html, body {
     background-color: #07070a;
@@ -31,7 +45,7 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* Carbon Fiber Texture Pattern */
+/* Carbon Fiber Texture Pattern with solid background fallback */
 .bg-carbon {
   background-color: #07070a;
   background-image:
@@ -45,7 +59,9 @@
 
 /* HUD Mirror mode: horizontally flips display for windshield projection */
 .hud-mirrored {
+  -webkit-transform: scaleX(-1);
   transform: scaleX(-1);
+  -webkit-transform-origin: center center;
   transform-origin: center center;
 }
 
@@ -59,6 +75,17 @@
 }
 
 /* Dimmed & breathing pulse for lost/acquiring fix states */
+@-webkit-keyframes breathing-pulse {
+  0%, 100% {
+    opacity: 0.35;
+    text-shadow: 0 0 10px rgba(255, 107, 0, 0.3);
+  }
+  50% {
+    opacity: 0.8;
+    text-shadow: 0 0 25px rgba(255, 107, 0, 0.65);
+  }
+}
+
 @keyframes breathing-pulse {
   0%, 100% {
     opacity: 0.35;
@@ -71,10 +98,19 @@
 }
 
 .speed-dim-pulse {
+  -webkit-animation: breathing-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   animation: breathing-pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
 }
 
 /* High-speed subtle 1px cockpit vibration above 120 km/h */
+@-webkit-keyframes high-speed-shake {
+  0% { -webkit-transform: translate(0, 0); transform: translate(0, 0); }
+  25% { -webkit-transform: translate(-1px, 0.5px); transform: translate(-1px, 0.5px); }
+  50% { -webkit-transform: translate(1px, -0.5px); transform: translate(1px, -0.5px); }
+  75% { -webkit-transform: translate(-0.5px, -1px); transform: translate(-0.5px, -1px); }
+  100% { -webkit-transform: translate(0, 0); transform: translate(0, 0); }
+}
+
 @keyframes high-speed-shake {
   0% { transform: translate(0, 0); }
   25% { transform: translate(-1px, 0.5px); }
@@ -84,27 +120,43 @@
 }
 
 .speed-shake {
+  -webkit-animation: high-speed-shake 0.08s infinite linear;
   animation: high-speed-shake 0.08s infinite linear;
 }
 
-/* Glowing dot & shift lamp classes */
+/* Glowing dot & shift lamp classes with solid colors */
 .glow-green {
+  background-color: #00e676;
   box-shadow: 0 0 10px #00e676, 0 0 20px rgba(0, 230, 118, 0.6);
 }
 
 .glow-yellow {
+  background-color: #ffea00;
   box-shadow: 0 0 10px #ffea00, 0 0 20px rgba(255, 234, 0, 0.6);
 }
 
 .glow-orange {
+  background-color: #ff6d00;
   box-shadow: 0 0 10px #ff6d00, 0 0 20px rgba(255, 109, 0, 0.7);
 }
 
 .glow-red {
+  background-color: #ff1744;
   box-shadow: 0 0 12px #ff1744, 0 0 24px rgba(255, 23, 68, 0.8);
 }
 
 /* Speed streaks drifting animation */
+@-webkit-keyframes streak-drift {
+  0% {
+    -webkit-transform: translate3d(0, 0, 0);
+    transform: translate3d(0, 0, 0);
+  }
+  100% {
+    -webkit-transform: translate3d(-300px, 300px, 0);
+    transform: translate3d(-300px, 300px, 0);
+  }
+}
+
 @keyframes streak-drift {
   0% {
     transform: translate3d(0, 0, 0);
@@ -115,6 +167,7 @@
 }
 
 .speed-streak-moving {
+  -webkit-animation: streak-drift var(--streak-duration, 1.2s) linear infinite;
   animation: streak-drift var(--streak-duration, 1.2s) linear infinite;
   will-change: transform;
 }
@@ -123,13 +176,16 @@
 @media (prefers-reduced-motion: reduce) {
   .speed-shake {
     animation: none !important;
+    -webkit-animation: none !important;
   }
   .speed-streak-moving {
     animation: none !important;
+    -webkit-animation: none !important;
     display: none !important;
   }
   .speed-dim-pulse {
     animation: none !important;
+    -webkit-animation: none !important;
     opacity: 0.6 !important;
   }
 }

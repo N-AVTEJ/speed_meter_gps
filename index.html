@@ -22,9 +22,39 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:ital,wght@1,800;1,900&family=JetBrains+Mono:wght@600;700;800&display=swap" rel="stylesheet" />
   </head>
-  <body>
-    <div id="root"></div>
+  <body style="background: #07070A; color: #ffffff; margin: 0; min-height: 100vh; overflow-x: hidden;">
+    <noscript>
+      <div style="padding: 24px; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #ffffff; background: #07070A; min-height: 100vh; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center;">
+        <h2 style="color: #ff3b30; margin-bottom: 12px;">JavaScript Required</h2>
+        <p style="color: #e5e5ea; max-width: 440px; line-height: 1.5;">Apex Moto Speedo requires JavaScript to access motorcycle GPS sensors and render the TFT dashboard.</p>
+      </div>
+    </noscript>
+    <div id="root">
+      <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #ff8800; background: #07070A; padding: 24px; text-align: center; box-sizing: border-box;">
+        <div style="font-size: 18px; font-weight: bold; letter-spacing: 1px;">Loading Apex Moto Speedo...</div>
+      </div>
+    </div>
+    <script>
+      (function() {
+        setTimeout(function() {
+          var root = document.getElementById('root');
+          if (root && root.innerText && root.innerText.indexOf('Loading Apex Moto Speedo...') !== -1) {
+            root.innerHTML =
+              '<div style="display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; color: #ffffff; background: #07070A; padding: 24px 16px; text-align: center; box-sizing: border-box;">' +
+              '<div style="max-width: 580px; width: 100%;">' +
+              '<div style="color: #ff3b30; font-size: 18px; font-weight: bold; margin-bottom: 12px; letter-spacing: 0.5px;">App failed to load.</div>' +
+              '<div style="font-size: 14px; color: #e5e5ea; margin-bottom: 20px; line-height: 1.5;">Update your browser or clear site data.</div>' +
+              '<div style="font-size: 11px; color: #8e8e93; background: #16161d; padding: 12px; border-radius: 6px; word-break: break-all; line-height: 1.4; border: 1px solid #2c2c36; margin-bottom: 24px; text-align: left;">' +
+              '<strong style="color: #aeaeb2; display: block; margin-bottom: 4px;">USER AGENT:</strong>' +
+              (navigator.userAgent || 'Unknown User-Agent') +
+              '</div>' +
+              '<button onclick="window.location.reload()" style="background: #ff6d00; color: #ffffff; border: none; border-radius: 8px; padding: 12px 28px; font-size: 14px; font-weight: bold; cursor: pointer; text-transform: uppercase; letter-spacing: 1px;">Reload</button>' +
+              '</div>' +
+              '</div>';
+          }
+        }, 6000);
+      })();
+    </script>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
-

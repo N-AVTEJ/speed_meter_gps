@@ -2,16 +2,25 @@ import { useEffect, useState, useCallback, useRef } from 'react';
 
 export function useWakeLock() {
   const [isActive, setIsActive] = useState(false);
-  const [isSupported, setIsSupported] = useState(true);
+  const [isSupported, setIsSupported] = useState(false);
   const wakeLockSentinelRef = useRef<WakeLockSentinel | null>(null);
 
   const requestWakeLock = useCallback(async () => {
-    if (typeof window === 'undefined' || !('wakeLock' in navigator)) {
-      setIsSupported(false);
-      return;
-    }
-
     try {
+      if (
+        typeof window === 'undefined' ||
+        typeof navigator === 'undefined' ||
+        !('wakeLock' in navigator) ||
+        !navigator.wakeLock ||
+        typeof navigator.wakeLock.request !== 'function'
+      ) {
+        setIsSupported(false);
+        setIsActive(false);
+        return;
+      }
+
+      setIsSupported(true);
+
       if (wakeLockSentinelRef.current && !wakeLockSentinelRef.current.released) {
         setIsActive(true);
         return;
@@ -26,44 +35,65 @@ export function useWakeLock() {
         wakeLockSentinelRef.current = null;
       });
     } catch {
-      // Browser may reject wake lock if window is in background or low battery
+      // Browser may reject wake lock if low battery or permission denied
       setIsActive(false);
     }
   }, []);
 
   const releaseWakeLock = useCallback(async () => {
-    if (wakeLockSentinelRef.current) {
-      try {
+    try {
+      if (wakeLockSentinelRef.current && typeof wakeLockSentinelRef.current.release === 'function') {
         await wakeLockSentinelRef.current.release();
-      } catch {
-        // Ignore error
       }
+    } catch {
+      // Ignore release error
+    } finally {
       wakeLockSentinelRef.current = null;
       setIsActive(false);
     }
   }, []);
 
   useEffect(() => {
-    // Initial request
-    if (document.visibilityState === 'visible') {
-      requestWakeLock();
-    }
-
-    // Re-request the Screen Wake Lock on visibilitychange when visible
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
+    try {
+      // Initial request if visible
+      if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
         requestWakeLock();
       }
-    };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-    window.addEventListener('focus', handleVisibilityChange);
+      // Re-request the Screen Wake Lock on visibilitychange when visible
+      const handleVisibilityChange = () => {
+        try {
+          if (typeof document !== 'undefined' && document.visibilityState === 'visible') {
+            requestWakeLock();
+          }
+        } catch {
+          // Never throw
+        }
+      };
 
-    return () => {
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
-      window.removeEventListener('focus', handleVisibilityChange);
-      releaseWakeLock();
-    };
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (typeof window !== 'undefined') {
+        window.addEventListener('focus', handleVisibilityChange);
+      }
+
+      return () => {
+        try {
+          if (typeof document !== 'undefined') {
+            document.removeEventListener('visibilitychange', handleVisibilityChange);
+          }
+          if (typeof window !== 'undefined') {
+            window.removeEventListener('focus', handleVisibilityChange);
+          }
+          releaseWakeLock();
+        } catch {
+          // Never throw
+        }
+      };
+    } catch {
+      // Never throw
+    }
   }, [requestWakeLock, releaseWakeLock]);
 
   return { isActive, isSupported, requestWakeLock };
