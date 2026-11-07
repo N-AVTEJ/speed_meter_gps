@@ -97,12 +97,30 @@ export class SpeedKalmanFilter {
   }
 
   /**
-   * Resets filter state (e.g. when signal is lost or GPS re-started).
+   * Resets filter state (e.g. when signal is lost, GPS restarted, or app launch).
+   * After reset, filter is marked uninitialized so the very next accepted fix's
+   * measured speed seeds the filter directly rather than ramping from 0.
    */
-  public reset(initialSpeed = 0): void {
-    this.x = Math.max(0, initialSpeed);
+  public reset(): void {
+    this.x = 0;
     this.p = 1.0;
     this.isInitialized = false;
+  }
+
+  /**
+   * Explicitly seeds filter with an initial speed measurement.
+   */
+  public seed(initialSpeed: number): void {
+    this.x = Math.max(0, initialSpeed);
+    this.p = 1.0;
+    this.isInitialized = true;
+  }
+
+  /**
+   * Checks if filter has already received its first seeding fix.
+   */
+  public isFilterInitialized(): boolean {
+    return this.isInitialized;
   }
 
   /**

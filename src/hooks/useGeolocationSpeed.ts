@@ -5,6 +5,7 @@ import {
   isFixAccurate,
   applySpeedThreshold,
   getAccuracyStatus,
+  shouldRejectSpeedJump,
   GeoFix,
   AccuracyLevel,
   GAUGE_MAX_KMH,
@@ -31,6 +32,7 @@ export interface GeolocationSpeedState {
   errorMessage: string | null;
   lastFixTime: number | null;
   isGpsLost: boolean;
+  hasReceivedFirstFix: boolean;
   retry: () => void;
   isSimulating: boolean;
   toggleSimulation: () => void;
@@ -47,9 +49,12 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [lastFixTime, setLastFixTime] = useState<number | null>(null);
   const [isGpsLost, setIsGpsLost] = useState<boolean>(true);
+  const [hasReceivedFirstFix, setHasReceivedFirstFix] = useState<boolean>(false);
 
   // Tracks timestamp of last ACCEPTED fix (accuracy <= 25m)
   const lastAcceptedFixTimeRef = useRef<number | null>(null);
+  // Tracks speed & timestamp of last ACCEPTED fix for jump rejection
+  const lastAcceptedSpeedFixRef = useRef<{ speedKmh: number; timestamp: number } | null>(null);
 
   // Check URL param ?demo=1 for testing
   const [isSimulating, setIsSimulating] = useState<boolean>(() => {
@@ -92,11 +97,6 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       return;
     }
 
-    // Accepted GPS Fix arrived! Update timestamp and mark signal active
-    lastAcceptedFixTimeRef.current = Date.now();
-    setIsGpsLost(false);
-    setAccuracyStatus(getAccuracyStatus(acc));
-
     // Determine raw speed (m/s -> km/h)
     let computedRawKmh = 0;
     const hasHardwareSpeed =
@@ -117,6 +117,23 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
       computedRawKmh = calculateFallbackSpeedKmh(prevFixRef.current, currentFix);
     }
 
+    // 2. Reject any accepted fix where speed jumps more than 25 km/h versus
+    // the previous accepted fix within 1 second.
+    if (lastAcceptedSpeedFixRef.current !== null) {
+      const timeDeltaMs = timestamp - lastAcceptedSpeedFixRef.current.timestamp;
+      if (shouldRejectSpeedJump(computedRawKmh, lastAcceptedSpeedFixRef.current.speedKmh, timeDeltaMs)) {
+        setDroppedFixCount((c) => c + 1);
+        return;
+      }
+    }
+
+    // Accepted GPS Fix arrived! Update timestamp and mark signal active
+    lastAcceptedFixTimeRef.current = timestamp;
+    lastAcceptedSpeedFixRef.current = { speedKmh: computedRawKmh, timestamp };
+    setIsGpsLost(false);
+    setHasReceivedFirstFix(true);
+    setAccuracyStatus(getAccuracyStatus(acc));
+
     // Save valid fix coordinates for next fallback computation
     prevFixRef.current = {
       latitude: coords.latitude,
@@ -126,7 +143,8 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
 
     setRawSpeedKmh(computedRawKmh);
 
-    // Apply 1D Kalman filter with process noise
+    // 1. After any Kalman reset or at app launch, seed the filter with the
+    // first accepted fix's measured speed, not 0.
     const filtered = kalmanFilterRef.current.update(computedRawKmh, acc);
     setFilteredSpeedKmh(filtered);
 
@@ -210,13 +228,15 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
   }, [handlePositionSuccess, handlePositionError, stopWatching]);
 
   const retry = useCallback(() => {
-    kalmanFilterRef.current.reset(0);
+    kalmanFilterRef.current.reset();
     prevFixRef.current = null;
     lastAcceptedFixTimeRef.current = null;
+    lastAcceptedSpeedFixRef.current = null;
     setRawSpeedKmh(0);
     setFilteredSpeedKmh(0);
     setDisplaySpeedKmh(null);
     setIsGpsLost(true);
+    setHasReceivedFirstFix(false);
     setAccuracy(null);
     setAccuracyStatus('red');
     setErrorMessage(null);
@@ -239,7 +259,8 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
         setDisplaySpeedKmh(null);
         setAccuracyStatus('red');
         setAccuracy(null);
-        kalmanFilterRef.current.reset(0);
+        kalmanFilterRef.current.reset();
+        lastAcceptedSpeedFixRef.current = null;
         prevFixRef.current = null;
       }
     };
@@ -254,6 +275,7 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
           simTimerRef.current = null;
         }
         lastAcceptedFixTimeRef.current = Date.now() - 3500;
+        lastAcceptedSpeedFixRef.current = null;
       };
     }
 
@@ -344,6 +366,7 @@ export function useGeolocationSpeed(): GeolocationSpeedState {
     errorMessage,
     lastFixTime,
     isGpsLost,
+    hasReceivedFirstFix,
     retry,
     isSimulating,
     toggleSimulation,

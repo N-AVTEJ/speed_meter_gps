@@ -139,3 +139,37 @@ export function getAccuracyStatus(
   }
   return 'yellow';
 }
+
+export const MAX_SPEED_JUMP_KMH = 25;
+export const SPEED_JUMP_MAX_TIME_DELTA_MS = 1000;
+
+/**
+ * Rejects any accepted fix where speed jumps more than 25 km/h versus
+ * the previous accepted fix within 1 second.
+ *
+ * @param currentSpeedKmh The candidate measured speed for the new fix (km/h)
+ * @param prevAcceptedSpeedKmh The measured speed of the previous accepted fix (null if first fix)
+ * @param timeDeltaMs Elapsed time in milliseconds between the fixes
+ * @param maxJumpKmh Maximum allowable speed jump within 1 second (default 25 km/h)
+ * @param maxTimeDeltaMs Time window for jump rejection (default 1000 ms)
+ * @returns true if the fix must be rejected due to an excessive jump within 1s
+ */
+export function shouldRejectSpeedJump(
+  currentSpeedKmh: number,
+  prevAcceptedSpeedKmh: number | null,
+  timeDeltaMs: number,
+  maxJumpKmh = MAX_SPEED_JUMP_KMH,
+  maxTimeDeltaMs = SPEED_JUMP_MAX_TIME_DELTA_MS
+): boolean {
+  // First fix at launch or after reset has no predecessor, cannot jump
+  if (prevAcceptedSpeedKmh === null) {
+    return false;
+  }
+  // The rule strictly applies within 1 second (0 <= delta <= 1000ms)
+  if (timeDeltaMs < 0 || timeDeltaMs > maxTimeDeltaMs) {
+    return false;
+  }
+  const speedDifference = Math.abs(currentSpeedKmh - prevAcceptedSpeedKmh);
+  return speedDifference > maxJumpKmh;
+}
+

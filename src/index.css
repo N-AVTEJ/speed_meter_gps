@@ -8,6 +8,8 @@
     -webkit-user-select: none;
     touch-action: manipulation;
     overflow-x: hidden;
+    min-height: 100vh;
+    min-height: 100dvh;
   }
 }
 

@@ -9,6 +9,7 @@ import {
   applySpeedThreshold,
   getAccuracyStatus,
   isGpsTimedOut,
+  shouldRejectSpeedJump,
   MAX_ACCEPTABLE_ACCURACY_METERS,
 } from './speedMath';
 
@@ -105,4 +106,25 @@ test('isGpsTimedOut detects 3s dropout accurately', () => {
 
   // Fix 4500 ms ago -> timed out!
   assert.equal(isGpsTimedOut(5500, 10000), true);
+});
+
+test('shouldRejectSpeedJump rejects jumps > 25 km/h versus previous accepted fix within 1 second', () => {
+  // First fix at launch or after reset: never rejected
+  assert.equal(shouldRejectSpeedJump(60, null, 500), false);
+  assert.equal(shouldRejectSpeedJump(150, null, 200), false);
+
+  // Jump <= 25 km/h within 1 second: ACCEPTED
+  assert.equal(shouldRejectSpeedJump(75, 50, 500), false); // +25 km/h at 500ms
+  assert.equal(shouldRejectSpeedJump(25, 50, 500), false); // -25 km/h at 500ms
+  assert.equal(shouldRejectSpeedJump(60, 50, 200), false); // +10 km/h at 200ms
+
+  // Jump > 25 km/h within 1 second: REJECTED
+  assert.equal(shouldRejectSpeedJump(76, 50, 500), true); // +26 km/h at 500ms
+  assert.equal(shouldRejectSpeedJump(24, 50, 500), true); // -26 km/h at 500ms
+  assert.equal(shouldRejectSpeedJump(120, 50, 800), true); // +70 km/h glitch at 800ms
+  assert.equal(shouldRejectSpeedJump(75.1, 50, 1000), true); // +25.1 km/h at 1000ms boundary
+
+  // Speed jump > 25 km/h but outside 1 second (> 1000 ms): ACCEPTED (not within 1 second)
+  assert.equal(shouldRejectSpeedJump(80, 50, 1050), false); // +30 km/h after 1050ms
+  assert.equal(shouldRejectSpeedJump(100, 50, 2000), false); // +50 km/h after 2s
 });

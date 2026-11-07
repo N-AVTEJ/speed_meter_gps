@@ -39,11 +39,29 @@ test('SpeedKalmanFilter reacts rapidly to throttle acceleration', () => {
   assert.ok(step3 > 100, `Expected tracking close to target on step 3, got ${step3}`);
 });
 
-test('SpeedKalmanFilter resets cleanly', () => {
+test('SpeedKalmanFilter seeds with first accepted fix measured speed at app launch, not 0', () => {
   const kf = new SpeedKalmanFilter();
-  kf.update(100);
-  kf.reset(0);
-  assert.equal(kf.getEstimate(), 0);
-  const next = kf.update(15);
-  assert.equal(next, 15);
+  assert.equal(kf.isFilterInitialized(), false);
+  // Rider launches app while already cruising at 85 km/h
+  const initialEstimate = kf.update(85);
+  assert.equal(initialEstimate, 85);
+  assert.equal(kf.getEstimate(), 85);
+  assert.equal(kf.isFilterInitialized(), true);
+});
+
+test('SpeedKalmanFilter seeds with first accepted fix measured speed after any reset, not 0', () => {
+  const kf = new SpeedKalmanFilter();
+  kf.update(50);
+  kf.update(55);
+
+  // GPS lost / signal reset occurs
+  kf.reset();
+  assert.equal(kf.isFilterInitialized(), false);
+
+  // First accepted fix after reset arrives at 95 km/h (e.g. exiting tunnel)
+  const afterResetEstimate = kf.update(95);
+  // Must be seeded directly with 95 km/h, not interpolated from 0
+  assert.equal(afterResetEstimate, 95);
+  assert.equal(kf.getEstimate(), 95);
+  assert.equal(kf.isFilterInitialized(), true);
 });

@@ -19,7 +19,8 @@ export default defineConfig(() => {
           description: 'High-contrast GPS speedometer for motorcycles with Kalman-filtered speed tracking and HUD mirror mode.',
           theme_color: '#0a0b0e',
           background_color: '#0a0b0e',
-          display: 'standalone',
+          display: 'fullscreen',
+          orientation: 'any',
           start_url: '/',
           scope: '/',
           icons: [

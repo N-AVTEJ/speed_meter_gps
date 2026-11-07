@@ -5,12 +5,14 @@ interface GpsStatusBadgeProps {
   status: AccuracyLevel;
   accuracy: number | null;
   droppedCount: number;
+  hasReceivedFirstFix?: boolean;
 }
 
 export const GpsStatusBadge: React.FC<GpsStatusBadgeProps> = ({
   status,
   accuracy,
   droppedCount,
+  hasReceivedFirstFix = false,
 }) => {
   // Dot styling
   const dotColorClass =
@@ -20,14 +22,15 @@ export const GpsStatusBadge: React.FC<GpsStatusBadgeProps> = ({
       ? 'bg-amber-400 glow-yellow'
       : 'bg-rose-500 glow-red animate-pulse';
 
-  const labelText =
-    status === 'green'
-      ? `GPS ±${accuracy ? Math.round(accuracy) : 0}m`
-      : status === 'yellow'
-      ? `GPS ±${accuracy ? Math.round(accuracy) : 0}m`
-      : accuracy && accuracy > 25
-      ? `DROPPED (>25m)`
-      : 'NO GPS FIX';
+  const labelText = !hasReceivedFirstFix
+    ? 'ACQUIRING GPS'
+    : status === 'green' && accuracy !== null
+    ? `GPS ±${Math.round(accuracy)}m`
+    : status === 'yellow' && accuracy !== null
+    ? `GPS ±${Math.round(accuracy)}m`
+    : accuracy && accuracy > 25
+    ? `DROPPED (>25m)`
+    : 'NO GPS FIX';
 
   return (
     <div

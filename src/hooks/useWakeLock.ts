@@ -44,8 +44,12 @@ export function useWakeLock() {
   }, []);
 
   useEffect(() => {
-    requestWakeLock();
+    // Initial request
+    if (document.visibilityState === 'visible') {
+      requestWakeLock();
+    }
 
+    // Re-request the Screen Wake Lock on visibilitychange when visible
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') {
         requestWakeLock();
@@ -53,9 +57,11 @@ export function useWakeLock() {
     };
 
     document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('focus', handleVisibilityChange);
 
     return () => {
       document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('focus', handleVisibilityChange);
       releaseWakeLock();
     };
   }, [requestWakeLock, releaseWakeLock]);

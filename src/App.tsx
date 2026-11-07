@@ -27,6 +27,7 @@ export default function App() {
     droppedFixCount,
     permissionStatus,
     errorMessage,
+    hasReceivedFirstFix,
     retry,
     isSimulating,
     toggleSimulation,
@@ -48,7 +49,15 @@ export default function App() {
     (permissionStatus === 'unavailable' && !isSimulating);
 
   return (
-    <main className="relative min-h-screen w-full bg-[#07080a] text-white flex flex-col justify-between overflow-hidden">
+    <main
+      className="relative min-h-screen w-full bg-[#07080a] text-white flex flex-col justify-between overflow-hidden"
+      style={{
+        paddingTop: 'max(0.75rem, env(safe-area-inset-top, 0px))',
+        paddingBottom: 'max(0.75rem, env(safe-area-inset-bottom, 0px))',
+        paddingLeft: 'max(0.75rem, env(safe-area-inset-left, 0px))',
+        paddingRight: 'max(0.75rem, env(safe-area-inset-right, 0px))',
+      }}
+    >
       {/* Subtle ambient cockpit radial background */}
       <div
         className="pointer-events-none absolute inset-0 z-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#1c2233]/40 via-[#0a0d14]/70 to-[#050608]"
@@ -56,13 +65,14 @@ export default function App() {
       />
 
       {/* Top Header Bar */}
-      <header className="relative z-30 w-full max-w-5xl mx-auto px-4 pt-4 sm:pt-6 flex items-center justify-between gap-4">
+      <header className="relative z-30 w-full max-w-5xl mx-auto px-4 pt-2 sm:pt-4 flex items-center justify-between gap-4">
         {/* GPS Accuracy Dot & Status */}
         <div className="flex items-center gap-3">
           <GpsStatusBadge
             status={accuracyStatus}
             accuracy={accuracy}
             droppedCount={droppedFixCount}
+            hasReceivedFirstFix={hasReceivedFirstFix}
           />
         </div>
 
