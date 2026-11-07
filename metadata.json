@@ -1,0 +1,10 @@
+{
+  "name": "Apex Moto Speedo - GPS Speedometer",
+  "description": "High-contrast GPS speedometer PWA for motorcycles with Kalman-filtered speed tracking, dark glassmorphism analog & digital gauge, HUD mirror mode, and offline PWA support.",
+  "requestFramePermissions": [
+    "geolocation"
+  ],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
